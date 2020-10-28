@@ -5,7 +5,7 @@ from object_detection.box_coders import faster_rcnn_box_coder
 import tensorflow as tf
 import numpy as np
 # Python STL
-from typing import Tuple
+from typing import Tuple,Dict
 # Local
 from .components import horizontal_multibox_layer, class_multibox_layer, smooth_l1
 from .boxes import relative_box_coordinates
@@ -343,7 +343,7 @@ class SSD512_VGG16(object):
         self._matched = tf.stack(matched, axis=0)
         self._n_matched = tf.math.reduce_sum( tf.where(self._matched >= 0, 1, 0), axis=-1 )
 
-    def loss(self, prediction_dict, alpha=1.):
+    def loss(self, prediction_dict, alpha=1.) -> Dict[str,tf.Tensor]:
         ####### Confidence/Class Loss #######
         logits = prediction_dict["logit"]
         class_loss = tf.nn.softmax_cross_entropy_with_logits(self._cls_targets, logits, axis=-1)
@@ -371,10 +371,15 @@ class SSD512_VGG16(object):
         loc_loss = tf.math.reduce_sum(loc_loss, axis=-1) # Sum across box coordinates
         loc_loss = self._reg_weights * loc_loss 
         loc_loss = tf.math.reduce_sum(loc_loss, axis=-1) # Sum across default boxes
-        
-        loss_by_image = (class_loss_by_image + alpha*loc_loss) / tf.cast(self._n_matched, tf.float32)
-        total_loss = tf.math.reduce_sum(loss_by_image)
-        
-        return total_loss
+
+        cast_n = tf.cast(self._n_matched, tf.float32)
+        total_loc_loss = tf.math.reduce_sum( loc_loss / cast_n )
+        total_class_loss = tf.math.reduce_sum( class_loss_by_image / cast_n)
+        losses_dict = {
+            "Localization": total_loc_loss,
+            "Confidence": total_class_loss,
+            "WeightedTotal": total_class_loss + alpha*total_loc_loss
+        }
+        return losses_dict
 
 __all__ = ["SSD512_VGG16"]
