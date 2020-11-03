@@ -13,17 +13,18 @@ from .boxes import relative_box_coordinates
 class SSD512_VGG16(object):
 
     @staticmethod
-    def from_scratch(nonbackground_classes, vgg_weights_path, quadrangles=False):
-        return SSD512_VGG16(nonbackground_classes,vgg_weights_path=vgg_weights_path, quadrangles=quadrangles)
+    def from_scratch(nonbackground_classes, vgg_weights_path, quadrangles=False, loc_weight=1.):
+        return SSD512_VGG16(nonbackground_classes,vgg_weights_path=vgg_weights_path, quadrangles=quadrangles, loc_weight=loc_weight)
 
     @staticmethod
-    def from_checkpoint(nonbackground_classes, checkpoint_path, quadrangles=False):
-        model = SSD512_VGG16(nonbackground_classes,vgg_weights_path=None, quadrangles=quadrangles)
+    def from_checkpoint(nonbackground_classes, checkpoint_path, quadrangles=False, loc_weight=1.):
+        model = SSD512_VGG16(nonbackground_classes,vgg_weights_path=None, quadrangles=quadrangles, loc_weight=loc_weight)
         model.checkpoint.restore(checkpoint_path)
         return model
 
-    def __init__(self, nonbackground_classes: int, vgg_weights_path = None, quadrangles=False):
+    def __init__(self, nonbackground_classes: int, vgg_weights_path = None, quadrangles=False, loc_weight=1.):
         self.input_dims = (512,512)
+        self._loc_weight = loc_weight
         self._feature_shapes = [ (64,64), (32,32), (16,16), (8,8), (4,4), (2,2), (1,1) ]
         self.quadrangles = quadrangles
         self.unmatched_class_label = tf.constant([1]+[0 for _ in range(nonbackground_classes)], dtype=tf.float32)
@@ -257,6 +258,13 @@ class SSD512_VGG16(object):
         self._scales = scales
 
     @property
+    def loc_weight(self) -> float:
+        return self._loc_weight
+    @loc_weight.setter
+    def loc_weight(self, v: float):
+        self._loc_weight = v
+
+    @property
     def trainable_variables(self):
         return self.model.trainable_variables
     
@@ -343,7 +351,7 @@ class SSD512_VGG16(object):
         self._matched = tf.stack(matched, axis=0)
         self._n_matched = tf.math.reduce_sum( tf.where(self._matched >= 0, 1, 0), axis=-1 )
 
-    def loss(self, prediction_dict, alpha=1.) -> Dict[str,tf.Tensor]:
+    def loss(self, prediction_dict) -> Dict[str,tf.Tensor]:
         ####### Confidence/Class Loss #######
         logits = prediction_dict["logit"]
         class_loss = tf.nn.softmax_cross_entropy_with_logits(self._cls_targets, logits, axis=-1)
@@ -378,7 +386,7 @@ class SSD512_VGG16(object):
         losses_dict = {
             "Localization": total_loc_loss,
             "Confidence": total_class_loss,
-            "WeightedTotal": total_class_loss + alpha*total_loc_loss
+            "WeightedTotal": total_class_loss + self.loc_weight*total_loc_loss
         }
         return losses_dict
 
