@@ -4,7 +4,7 @@ setuptools.setup(
     name="ssd-tensorflow",
     version="0.0.1a",
     author="Ethan Mines",
-    packages=["ssd"],
+    packages=["ssd","common"],
     install_requires=[
         "pycocotools",
         "object-detection",
