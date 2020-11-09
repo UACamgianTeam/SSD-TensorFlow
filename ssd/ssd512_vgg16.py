@@ -5,7 +5,7 @@ from object_detection.box_coders import faster_rcnn_box_coder
 import tensorflow as tf
 import numpy as np
 # Python STL
-from typing import Tuple,Dict
+from typing import Tuple,Dict,List
 # Local
 from .components import horizontal_multibox_layer, class_multibox_layer, smooth_l1
 from .boxes import relative_box_coordinates
@@ -13,17 +13,48 @@ from .boxes import relative_box_coordinates
 class SSD512_VGG16(object):
 
     @staticmethod
-    def from_scratch(nonbackground_classes, vgg_weights_path, quadrangles=False, loc_weight=1.):
-        return SSD512_VGG16(nonbackground_classes,vgg_weights_path=vgg_weights_path, quadrangles=quadrangles, loc_weight=loc_weight)
+    def from_scratch(nonbackground_classes : int,
+                     vgg_weights_path      : str,
+                     quadrangles           : bool  = False,
+                     loc_weight            : float = 1.,
+                     nms_redund_threshold  : float = 0.2,
+                     top_k_per_class       : int   = 100,
+                     predictor_subset      : List[int] = None):
+        return SSD512_VGG16(nonbackground_classes,
+                vgg_weights_path=vgg_weights_path,
+                quadrangles=quadrangles,
+                loc_weight=loc_weight,
+                nms_redund_threshold=nms_redund_threshold,
+                predictor_subset=predictor_subset)
 
     @staticmethod
-    def from_checkpoint(nonbackground_classes, checkpoint_path, quadrangles=False, loc_weight=1.):
-        model = SSD512_VGG16(nonbackground_classes,vgg_weights_path=None, quadrangles=quadrangles, loc_weight=loc_weight)
+    def from_checkpoint(nonbackground_classes : int,
+                        checkpoint_path       : str,
+                        quadrangles           : bool  = False,
+                        loc_weight            : float = 1.,
+                        nms_redund_threshold  : float = 0.2,
+                        top_k_per_class       : int   = 100,
+                        predictor_subset      : List[int] = None):
+        model = SSD512_VGG16(nonbackground_classes,
+                vgg_weights_path=None,
+                quadrangles=quadrangles,
+                loc_weight=loc_weight,
+                nms_redund_threshold=nms_redund_threshold,
+                predictor_subset=predictor_subset)
         model.checkpoint.restore(checkpoint_path)
         return model
 
-    def __init__(self, nonbackground_classes: int, vgg_weights_path = None, quadrangles=False, loc_weight=1.):
+    def __init__(self,
+            nonbackground_classes: int,
+            vgg_weights_path = None,
+            quadrangles=False,
+            loc_weight=1.,
+            nms_redund_threshold=0.2,
+            top_k_per_class          : int   = 100,
+            predictor_subset=None):
         self.input_dims = (512,512)
+        self._nms_redund_threshold = nms_redund_threshold
+        self._top_k_per_class = top_k_per_class
         self._loc_weight = loc_weight
         self._feature_shapes = [ (64,64), (32,32), (16,16), (8,8), (4,4), (2,2), (1,1) ]
         self.quadrangles = quadrangles
@@ -35,6 +66,12 @@ class SSD512_VGG16(object):
 
         self._load_features(vgg_weights_path = vgg_weights_path)
         assert len(self._feature_shapes) == len(self.feature_maps)
+
+        if not predictor_subset: predictor_subset = list(range(len(self._ratios)))
+        self._feature_shapes = [self._feature_shapes[i] for i in predictor_subset]
+        self.feature_maps = [self.feature_maps[i] for i in predictor_subset]
+        self._ratios = [self._ratios[i] for i in predictor_subset]
+        self._scales = [self._scales[i] for i in predictor_subset]
 
         # Network output
         self.coordinates = [] 
@@ -114,8 +151,8 @@ class SSD512_VGG16(object):
     
         def nms_class(scores, class_index):
             (best_inds, best_scores) = tf.image.non_max_suppression_with_scores(boxes,scores,
-                                                                                max_output_size=2*self.top_k,
-                                                                                iou_threshold=0.45,
+                                                                                max_output_size=self.top_k_per_class,
+                                                                                iou_threshold=self.nms_redund_threshold,
                                                                                 score_threshold=0.01)
             best_boxes = tf.gather(boxes, best_inds, axis=0)
             best_labels = tf.fill( tf.shape(best_boxes)[:-1], class_index)
@@ -288,6 +325,19 @@ class SSD512_VGG16(object):
     def top_k(self, v):
         self._top_k = tf.convert_to_tensor(v)
 
+    @property
+    def nms_redund_threshold(self):
+        return self._nms_redund_threshold
+    @nms_redund_threshold.setter
+    def nms_redund_threshold(self, v):
+        self._nms_redund_threshold = v
+
+    @property
+    def top_k_per_class(self):
+        return self._top_k_per_class
+    @top_k_per_class.setter
+    def top_k_per_class(self, v):
+        self._top_k_per_class = v
 
     def provide_groundtruth(self, groundtruth_boxes_list, groundtruth_labels_list):
         # Assume groundtruth_boxes_list has axes [image, box, coordinates]
@@ -351,7 +401,7 @@ class SSD512_VGG16(object):
         self._matched = tf.stack(matched, axis=0)
         self._n_matched = tf.math.reduce_sum( tf.where(self._matched >= 0, 1, 0), axis=-1 )
 
-    def loss(self, prediction_dict) -> Dict[str,tf.Tensor]:
+    def loss(self, prediction_dict, beta=0.001) -> Dict[str,tf.Tensor]:
         ####### Confidence/Class Loss #######
         logits = prediction_dict["logit"]
         class_loss = tf.nn.softmax_cross_entropy_with_logits(self._cls_targets, logits, axis=-1)
@@ -364,13 +414,14 @@ class SSD512_VGG16(object):
         neg_class_loss = tf.sort( tf.where(self._matched >= 0, 0, class_loss), direction="DESCENDING", axis=-1)
         # len(top_k) == num_images
         # For a given image, we want the ratio of unmatched to matched default boxes to be at most 3:1 (See page 6 of original SSD paper)
-        top_k = tf.math.minimum(self._n_matched * 3, self.n_default_boxes - self._n_matched)
+        #top_k = tf.math.minimum(self._n_matched * 3, self.n_default_boxes - self._n_matched)
+        top_k = self.n_default_boxes - self._n_matched # Equivalent to not doing OHEM
         # Sum the loss of the top-k boxes for each image
         def top_k_loss(args):
             (image_loss, k) = args
             return tf.math.reduce_sum(image_loss[:k], axis=-1)
         mined_neg_loss = tf.map_fn(top_k_loss, (neg_class_loss, top_k), fn_output_signature=tf.float32)
-        class_loss_by_image = pos_class_loss + mined_neg_loss
+        class_loss_by_image = pos_class_loss + beta*mined_neg_loss
         
         ####### Localization Loss #######
         pred_boxes = prediction_dict["bbox"]
