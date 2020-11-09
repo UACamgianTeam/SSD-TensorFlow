@@ -6,6 +6,7 @@ setuptools.setup(
     author="Ethan Mines",
     packages=["ssd","common"],
     install_requires=[
+        "oriented-object-detection",
         "pycocotools",
         "object-detection",
         "tensorflow",

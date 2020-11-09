@@ -3,9 +3,9 @@ from object_detection.metrics.coco_tools import COCOWrapper,COCOEvalWrapper
 # Python STL
 import os
 import json
-# DOTA-Retraining Code
-from evaluate.detect import run_inference
-from evaluate.eval import write_window_validation_file, write_window_results, evaluate
+# oriented-object-detection
+from ood.detect import run_inference
+from ood.evaluate import write_window_validation_file, write_window_results, evaluate
 
 
 def coco_eval(data_path, annotations, images_np, images_dict, desired_ids, label_id_offsets, model):
