@@ -3,7 +3,7 @@ from typing import List, Tuple
 # 3rd Party
 import numpy as np
 
-def multilayer_default_boxes(feature_shapes, ratios, scales, quadrangles=False)
+def multilayer_default_boxes(feature_shapes, ratios, scales, quadrangles=False):
     # Coordinates of default boxes
     default_boxes = []
     for (feature_shape, ratio_set, scale_set) in zip(feature_shapes, ratios, scales):
@@ -14,6 +14,7 @@ def multilayer_default_boxes(feature_shapes, ratios, scales, quadrangles=False)
         ])
         default_boxes.append(coords)
     default_boxes = np.concatenate(default_boxes, axis=0)
+    return default_boxes
 
 def default_box_mesh(feature_shape: Tuple[int,int], ratios: List[float], scales: List[float]) -> np.ndarray:
     """

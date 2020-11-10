@@ -1,7 +1,5 @@
 # 3rd Party
-from object_detection.core import target_assigner, region_similarity_calculator
 from object_detection.core.box_list import BoxList
-from object_detection.matchers import hungarian_matcher
 from object_detection.box_coders import faster_rcnn_box_coder
 import tensorflow as tf
 import numpy as np
@@ -9,7 +7,8 @@ import numpy as np
 from typing import Tuple,Dict,List
 # Local
 from .components import horizontal_multibox_layer, class_multibox_layer, smooth_l1
-from .boxes import relative_box_coordinates
+from .boxes import multilayer_default_boxes
+from .targets import compute_ssd_targets
 
 class AbstractSSD(object):
 
@@ -38,7 +37,7 @@ class AbstractSSD(object):
     ##### CONCRETE #####
 
     def __init__(self,
-            nonbackground_classes : int
+            nonbackground_classes : int,
             loc_weight : float = 1.,
             nms_redund_threshold : float = 0.2,
             top_k_per_class : int = 100,
@@ -134,24 +133,29 @@ class AbstractSSD(object):
                 "detection_scores": out_scores,
                 "detection_classes": out_classes} 
 
-        def provide_groundtruth(self, groundtruth_boxes_list: List[tf.Tensor], groundtruth_labels_list: List[tf.Tensor]):
-
-            output = self.compute_targets(groundtruth_boxes_list, groundtruth_labels_list)
-            self.provide_groundtruth_direct(*output)
-
-        def provide_groundtruth_direct(self,
-                                        cls_targets : tf.Tensor,
-                                        cls_weights : tf.Tensor,
-                                        reg_targets : tf.Tensor,
-                                        reg_weights : tf.Tensor,
-                                        matched     : tf.Tensor):
-            self._cls_targets = cls_targets
-            self._cls_weights = cls_weights
-            self._reg_targets = reg_targets
-            self._reg_weights = reg_weights
-            self._matched = matched
+    def provide_groundtruth(self, groundtruth_boxes_list: List[tf.Tensor], groundtruth_labels_list: List[tf.Tensor]):
+    
+        output = compute_ssd_targets(groundtruth_boxes_list,
+                                groundtruth_labels_list,
+                                self.default_boxes,
+                                self.box_coder,
+                                self.unmatched_class_label)
+        self.provide_groundtruth_direct(*output)
+    
+    def provide_groundtruth_direct(self,
+                                    cls_targets : tf.Tensor,
+                                    cls_weights : tf.Tensor,
+                                    reg_targets : tf.Tensor,
+                                    reg_weights : tf.Tensor,
+                                    matched     : tf.Tensor):
+        self._cls_targets = cls_targets
+        self._cls_weights = cls_weights
+        self._reg_targets = reg_targets
+        self._reg_weights = reg_weights
+        self._matched = matched
 
     def loss(self, prediction_dict, beta=0.001, ohem=False) -> Dict[str,tf.Tensor]:
+        n_matched = tf.math.reduce_sum( tf.where(self._matched >= 0, 1, 0), axis=-1 )
         ####### Confidence/Class Loss #######
         logits = prediction_dict["logit"]
         class_loss = tf.nn.softmax_cross_entropy_with_logits(self._cls_targets, logits, axis=-1)
@@ -164,9 +168,9 @@ class AbstractSSD(object):
         neg_class_loss = tf.sort( tf.where(self._matched >= 0, 0, class_loss), direction="DESCENDING", axis=-1)
 
         if ohem:
-            top_k = tf.math.minimum(self._n_matched * 3, self.n_default_boxes - self._n_matched)
+            top_k = tf.math.minimum(n_matched * 3, self.n_default_boxes - n_matched)
         else:
-            top_k = self.n_default_boxes - self._n_matched # Equivalent to not doing OHEM
+            top_k = self.n_default_boxes - n_matched # Equivalent to not doing OHEM
 
         # For a given image, we want the ratio of unmatched to matched default boxes to be at most 3:1 (See page 6 of original SSD paper)
         # Sum the loss of the top-k boxes for each image
@@ -184,7 +188,7 @@ class AbstractSSD(object):
         loc_loss = self._reg_weights * loc_loss 
         loc_loss = tf.math.reduce_sum(loc_loss, axis=-1) # Sum across default boxes
 
-        cast_n = tf.cast(self._n_matched, tf.float32)
+        cast_n = tf.cast(n_matched, tf.float32)
         total_loc_loss = tf.math.reduce_sum( loc_loss / cast_n )
         total_class_loss = tf.math.reduce_sum( class_loss_by_image / cast_n)
         losses_dict = {

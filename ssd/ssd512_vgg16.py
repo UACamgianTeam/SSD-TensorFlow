@@ -1,5 +1,5 @@
 # 3rd Party
-rom object_detection.core.box_list import BoxList
+from object_detection.core.box_list import BoxList
 import tensorflow as tf
 import numpy as np
 # Python STL
@@ -100,7 +100,7 @@ class SSD512_VGG16(AbstractSSD):
 
         default_boxes = multilayer_default_boxes(self._feature_shapes, self._ratios, self._scales)
         default_boxes = tf.constant(default_boxes, dtype=tf.float32)
-        self.default_boxes = BoxList(default_boxes)
+        self._default_boxes = BoxList(default_boxes)
 
         self._load_features(vgg_weights_path = vgg_weights_path)
         assert len(self._feature_shapes) == len(self._feature_maps)
@@ -237,6 +237,9 @@ class SSD512_VGG16(AbstractSSD):
     @property
     def feature_shapes(self):
         return self._feature_shapes
+    @property
+    def default_boxes(self):
+        return self._default_boxes
     @property
     def checkpoint(self) -> tf.train.Checkpoint:
         return self._checkpoint

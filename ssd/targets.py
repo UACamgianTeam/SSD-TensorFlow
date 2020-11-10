@@ -1,13 +1,17 @@
 # 3rd Party
 import tensorflow as tf
+from object_detection.matchers import hungarian_matcher
+from object_detection.core import target_assigner, region_similarity_calculator
+from object_detection.core.box_list import BoxList
+from object_detection.box_coders import faster_rcnn_box_coder
 # Python STL
 from typing import List, Tuple
 
-def compute_ssd_targets(self,
-                    gt_boxes_list: List[tf.Tensor],
+def compute_ssd_targets(gt_boxes_list: List[tf.Tensor],
                     gt_labels_list: List[tf.Tensor],
                     default_boxes,
-                    box_coder) -> Tuple[tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor]:
+                    box_coder,
+                    unmatched_class_label) -> Tuple[tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor]:
     """
     """
 
@@ -29,10 +33,10 @@ def compute_ssd_targets(self,
     matched = []
     for (gtb_arr, gtl_arr) in zip(gt_boxes_list, gt_labels_list):
         result = assigner.assign(
-            anchors=self.default_boxes,
-            gt_boxes=box_list.BoxList(gtb_arr),
-            gt_labels=gtl_arr,
-            unmatched_class_label=self.unmatched_class_label
+            anchors=default_boxes,
+            groundtruth_boxes=BoxList(gtb_arr),
+            groundtruth_labels=gtl_arr,
+            unmatched_class_label=unmatched_class_label
         )
         cls_targets.append(result[0])
         cls_weights.append(result[1])
