@@ -3,7 +3,19 @@ from typing import List, Tuple
 # 3rd Party
 import numpy as np
 
-def relative_box_coordinates(feature_shape: Tuple[int,int], ratios: List[float], scales: List[float]) -> np.ndarray:
+def multilayer_default_boxes(feature_shapes, ratios, scales, quadrangles=False)
+    # Coordinates of default boxes
+    default_boxes = []
+    for (feature_shape, ratio_set, scale_set) in zip(feature_shapes, ratios, scales):
+        coords = default_box_mesh(feature_shape,ratio_set,scale_set)
+        coords = np.reshape(coords, [
+                                    feature_shape[0]*feature_shape[1]*len(ratio_set),
+                                    8 if quadrangles else 4
+        ])
+        default_boxes.append(coords)
+    default_boxes = np.concatenate(default_boxes, axis=0)
+
+def default_box_mesh(feature_shape: Tuple[int,int], ratios: List[float], scales: List[float]) -> np.ndarray:
     """
     Coordinates are vertex-based: (ymin,xmin, ymax, xmax)
     
@@ -41,4 +53,5 @@ def relative_box_coordinates(feature_shape: Tuple[int,int], ratios: List[float],
     
     return coordinates
 
-__all__ = ["relative_box_coordinates"]
+
+__all__ = ["multilayer_default_boxes, default_box_mesh"]
