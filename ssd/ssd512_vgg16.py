@@ -78,6 +78,19 @@ class SSD512_VGG16(AbstractSSD):
             scales.append(scale_set)
         return scales
 
+    @staticmethod
+    def get_default_boxes():
+        feature_shapes = SSD512_VGG16.get_feature_shapes()
+        ratios         = SSD512_VGG16.get_ratios()
+        scales         = SSD512_VGG16.get_scales()
+        default_boxes  = multilayer_default_boxes(feature_shapes, ratios, scales)
+        default_boxes  = tf.constant(default_boxes, dtype=tf.float32)
+        return BoxList(default_boxes)
+
+    @staticmethod
+    def get_unmatched_class_target(num_classes):
+        return AbstractSSD.get_unmatched_class_target(num_classes)
+
     def __init__(self,
             nonbackground_classes: int,
             vgg_weights_path = None,

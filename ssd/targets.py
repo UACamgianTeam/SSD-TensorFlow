@@ -7,20 +7,13 @@ from object_detection.box_coders import faster_rcnn_box_coder
 # Python STL
 from typing import List, Tuple
 
-def compute_ssd_targets(gt_boxes_list: List[tf.Tensor],
-                    gt_labels_list: List[tf.Tensor],
-                    default_boxes,
-                    box_coder,
-                    unmatched_class_label) -> Tuple[tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor]:
+def compute_ssd_targets(gt_boxes_list         : List[tf.Tensor],
+                        gt_labels_list        : List[tf.Tensor],
+                        default_boxes         : BoxList,
+                        box_coder,
+                        unmatched_class_target : tf.Tensor ) -> Tuple[tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor,tf.Tensor]:
     """
     """
-
-    def concat_zero(arr):
-        zero = tf.zeros( [*arr.shape[:-1], 1] )
-        return tf.concat([zero, arr], axis=-1)
-    gt_labels_list = list(map(concat_zero, gt_labels_list))
-
-
     assigner = target_assigner.TargetAssigner(
                 region_similarity_calculator.IouSimilarity(),
                 hungarian_matcher.HungarianBipartiteMatcher(),
@@ -34,9 +27,9 @@ def compute_ssd_targets(gt_boxes_list: List[tf.Tensor],
     for (gtb_arr, gtl_arr) in zip(gt_boxes_list, gt_labels_list):
         result = assigner.assign(
             anchors=default_boxes,
-            groundtruth_boxes=BoxList(gtb_arr),
+            groundtruth_boxes=BoxList(tf.constant(gtb_arr,dtype=tf.float32)),
             groundtruth_labels=gtl_arr,
-            unmatched_class_label=unmatched_class_label
+            unmatched_class_label=unmatched_class_target
         )
         cls_targets.append(result[0])
         cls_weights.append(result[1])

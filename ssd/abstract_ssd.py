@@ -45,13 +45,16 @@ class AbstractSSD(object):
 
         self.num_nonbackground_classes = nonbackground_classes
         self.num_classes = nonbackground_classes + 1
-        self.unmatched_class_label = tf.constant([1]+[0 for _ in range(nonbackground_classes)], dtype=tf.float32)
         self.box_coder = box_coder
 
         self._loc_weight = loc_weight
         self._nms_redund_threshold = nms_redund_threshold
         self._top_k_per_class = top_k_per_class
         pass
+
+    @staticmethod
+    def get_unmatched_class_target(num_classes):
+        return tf.constant([1] + [0]*num_classes, dtype=tf.float32)
 
     @property
     def n_default_boxes(self):
@@ -135,11 +138,12 @@ class AbstractSSD(object):
 
     def provide_groundtruth(self, groundtruth_boxes_list: List[tf.Tensor], groundtruth_labels_list: List[tf.Tensor]):
     
+        unmatched_class_label = tf.constant([1] + [0 for _ in range(self.num_nonbackground_classes)], dtype=tf.float32)
         output = compute_ssd_targets(groundtruth_boxes_list,
                                 groundtruth_labels_list,
                                 self.default_boxes,
                                 self.box_coder,
-                                self.unmatched_class_label)
+                                AbstractSSD.get_unmatched_class_target())
         self.provide_groundtruth_direct(*output)
     
     def provide_groundtruth_direct(self,
