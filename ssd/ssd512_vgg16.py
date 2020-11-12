@@ -43,6 +43,10 @@ class SSD512_VGG16(AbstractSSD):
         return model
 
     @staticmethod
+    def get_input_dims():
+        return (512, 512)
+
+    @staticmethod
     def get_feature_shapes():                                                              
         return [ (64,64), (32,32), (16,16), (8,8), (4,4), (2,2), (1,1) ]
 
@@ -105,7 +109,7 @@ class SSD512_VGG16(AbstractSSD):
                                             loc_weight=loc_weight)
 
 
-        self.input_dims      = (512,512)
+        self.input_dims      = SSD512_VGG16.get_input_dims()
         self._feature_shapes = SSD512_VGG16.get_feature_shapes()
         self._ratios         = SSD512_VGG16.get_ratios()
         self._scales         = SSD512_VGG16.get_scales()
