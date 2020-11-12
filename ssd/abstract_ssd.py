@@ -85,7 +85,7 @@ class AbstractSSD(object):
         probs = tf.keras.layers.Softmax()(logits)
     
         boxes = tf.squeeze(prediction_dict["bbox"])
-        boxes = faster_rcnn_box_coder.FasterRcnnBoxCoder().decode(boxes, self.default_boxes)
+        boxes = self.box_coder.decode(boxes, self.default_boxes)
         boxes = boxes.get() # The actual array of boxes
     
     
@@ -123,11 +123,12 @@ class AbstractSSD(object):
         
         
         sorted_indices = tf.argsort(out_scores, direction='DESCENDING')
-        if len(sorted_indices) > self._top_k: sorted_indices = sorted_indices[:self.top_k]
+        if len(sorted_indices) > self.top_k_per_class: sorted_indices = sorted_indices[:self.top_k_per_class]
         out_boxes = tf.gather(out_boxes, sorted_indices)
         out_scores = tf.gather(out_scores, sorted_indices)
         out_classes = tf.gather(out_classes, sorted_indices)
         
+        # FIXME: These three lines assume we had a batch of one
         out_boxes = tf.expand_dims(out_boxes, axis=0)
         out_scores = tf.expand_dims(out_scores, axis=0)
         out_classes = tf.expand_dims(out_classes, axis=0)
