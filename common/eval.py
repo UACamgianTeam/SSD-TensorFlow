@@ -12,7 +12,7 @@ from ood.evaluate import write_window_validation_file, write_window_results, eva
 from ood.utils import *
 from ood.preprocess import *
 
-def coco_eval(model, annotations_path, image_dir, desired_categories, win_set=None, results_dir="/tmp"):
+def coco_eval(model, annotations_path, image_dir, desired_categories, win_set=None, min_coverage=.3, results_dir="/tmp"):
     timestamp   = int(time())
     results_dir = os.path.join(results_dir, f"coco_{timestamp}")
     os.makedirs(results_dir, exist_ok=True)
@@ -30,8 +30,10 @@ def coco_eval(model, annotations_path, image_dir, desired_categories, win_set=No
                                 file_name_dict,
                                 image_dir,
                                 annotations,
-                                category_index)
-    test_images_dict, predicted_boxes, predicted_classes, predicted_scores = run_inference(model, preprocessor, label_id_offsets, win_set=win_set)
+                                category_index,
+                                win_set=win_set,
+                                min_coverage=min_coverage)
+    test_images_dict, predicted_boxes, predicted_classes, predicted_scores = run_inference(model, preprocessor, label_id_offsets)
     write_window_results(results_path, test_images_dict, min_threshold=.01)
     write_window_validation_file(labels_path, annotations, test_images_dict)
     
