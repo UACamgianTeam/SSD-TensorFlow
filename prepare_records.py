@@ -18,6 +18,11 @@ from ssd import SSD512_VGG16
 from ssd.targets import compute_ssd_targets
 from ssd.data    import *
 
+def win_tuple(arg):
+    toks = arg.split(",")
+    assert len(toks) == 4
+    return tuple(int(tok) for tok in toks)
+
 def main(out_dir,
         image_dir,
         annotations_path,
@@ -51,8 +56,14 @@ def main(out_dir,
     writers   = [tf.io.TFRecordWriter(f) for f in filenames]
     
     count = 0    
-    preprocessor = Preprocessor(images_dict, file_name_dict, image_dir, annotations, category_index)
-    for (window_np, gt_boxes, gt_classes) in preprocessor.iterate(win_set, min_coverage=min_coverage):
+    preprocessor = Preprocessor(images_dict,
+            file_name_dict,
+            image_dir,
+            annotations,
+            category_index,
+            win_set=win_set,
+            min_coverage=min_coverage)
+    for (window_np, gt_boxes, gt_classes) in preprocessor.iterate():
         window_np = tf.image.resize(window_np, input_dims)
 
         [gt_classes] = map_category_ids_to_index(label_id_offsets, [gt_classes])
@@ -81,37 +92,45 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate TF Records from DOTA data for training an SSD")
 
     parser.add_argument("--in_dir", type=os.path.abspath, help="Input directory", required=True)
-    parser.add_argument("--out_dir", type=os.path.abspath, help="Output directory", required=True)
 
     parser.add_argument("--sports", action="store_true", help="Limit to four sports categories")
-    parser.add_argument("--partition", default="training", help="'train' or 'validation'")
     parser.add_argument("--out-files", type=int, default=30, help="Number of record files to generate")
 
     parser.add_argument("--min-coverage", type=float, default=0.3, help="For annotation to be preserved after windowing, at least this much must be present in the window")
 
-    args = parser.parse_args()
+    parser.add_argument("--win", type=win_tuple, default=(1024,1024,512,512), help="How to window images: \"height,width,vert_stride,horiz_stride\"")
 
+    args = parser.parse_args()
 
     if args.sports:
         desired_categories = ["tennis-court", "baseball-diamond", "ground-track-field", "soccer-ball-field"]
     else:
         desired_categories = None
         
+    min_coverage = args.min_coverage
+    win_set      = args.win
+    win_string   = "x".join(map(str,win_set))
+    records_dir  = os.path.join(args.in_dir, f"records_window{win_string}_coverage{min_coverage}")
 
-    image_dir        = os.path.join(args.in_dir, f"{args.partition}/images")
-    annotations_path = os.path.join(args.in_dir, f"annotations/{args.partition}.json")
-    partition_out = os.path.join(args.out_dir, args.partition)
+    def write_partition(partition):
+        image_dir        = os.path.join(args.in_dir, f"{partition}/images")
+        annotations_path = os.path.join(args.in_dir, f"annotations/{partition}.json")
+        partition_out    = os.path.join(records_dir, partition)
+        main(partition_out,
+                image_dir,
+                annotations_path,
+                win_set=win_set,
+                min_coverage=min_coverage,
+                desired_categories=desired_categories,
+                num_out_files=args.out_files
+        )
 
-    win_height = 1024
-    win_width  = 1024
-    win_stride_vert  = 512
-    win_stride_horiz = 512
-    win_set = (win_height, win_width, win_stride_vert, win_stride_horiz) # windowing information
-    main(partition_out,
-            image_dir,
-            annotations_path,
-            win_set=win_set,
-            min_coverage=args.min_coverage,
-            desired_categories=desired_categories,
-            num_out_files=args.out_files
-    )
+    write_partition("train")
+    write_partition("validation")
+    out_meta = os.path.join(records_dir, "meta.json")
+    with open(out_meta, "w") as w:
+        w.write(json.dumps({
+            "classes": list(desired_categories),
+            "win_set": list(win_set),
+            "min_coverage": float(min_coverage)
+        }, indent=2) + "\n")

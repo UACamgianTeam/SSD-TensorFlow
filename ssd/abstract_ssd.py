@@ -40,15 +40,21 @@ class AbstractSSD(object):
             nonbackground_classes : int,
             loc_weight : float = 1.,
             nms_redund_threshold : float = 0.2,
+            min_score_threshold : float  = 0.01,
             top_k_per_class : int = 100,
+            ohem : bool = False,
+            neg_loss_weight : float = 1.,
             box_coder = faster_rcnn_box_coder.FasterRcnnBoxCoder()):
 
         self.num_nonbackground_classes = nonbackground_classes
         self.num_classes = nonbackground_classes + 1
         self.box_coder = box_coder
 
+        self._ohem = ohem
+        self._neg_loss_weight = neg_loss_weight
         self._loc_weight = loc_weight
         self._nms_redund_threshold = nms_redund_threshold
+        self._min_score_threshold = min_score_threshold
         self._top_k_per_class = top_k_per_class
         pass
 
@@ -59,12 +65,21 @@ class AbstractSSD(object):
     @property
     def n_default_boxes(self):
         return self.default_boxes.get().shape[0]
+
     @property
     def nms_redund_threshold(self):
         return self._nms_redund_threshold
     @nms_redund_threshold.setter
     def nms_redund_threshold(self, v):
         self._nms_redund_threshold = v
+
+    @property
+    def min_score_threshold(self):
+        return self._min_score_threshold
+    @min_score_threshold.setter
+    def min_score_threshold(self, v):
+        self._min_score_threshold = v
+
     @property
     def top_k_per_class(self):
         return self._top_k_per_class
@@ -77,6 +92,18 @@ class AbstractSSD(object):
     @loc_weight.setter
     def loc_weight(self, v: float):
         self._loc_weight = v
+    @property
+    def ohem(self) -> float:
+        return self._ohem
+    @ohem.setter
+    def ohem(self, v: float):
+        self._ohem = v
+    @property
+    def neg_loss_weight(self) -> float:
+        return self._neg_loss_weight
+    @neg_loss_weight.setter
+    def neg_loss_weight(self, v: float):
+        self._neg_loss_weight = v
 
 
     @tf.function
@@ -159,7 +186,7 @@ class AbstractSSD(object):
         self._reg_weights = reg_weights
         self._matched = matched
 
-    def loss(self, prediction_dict, beta=0.001, ohem=False) -> Dict[str,tf.Tensor]:
+    def loss(self, prediction_dict) -> Dict[str,tf.Tensor]:
         n_matched = tf.math.reduce_sum( tf.where(self._matched >= 0, 1, 0), axis=-1 )
         ####### Confidence/Class Loss #######
         logits = prediction_dict["logit"]
@@ -172,7 +199,7 @@ class AbstractSSD(object):
         # Hard negative mining (the hard part--pun intended)
         neg_class_loss = tf.sort( tf.where(self._matched >= 0, 0, class_loss), direction="DESCENDING", axis=-1)
 
-        if ohem:
+        if self.ohem:
             top_k = tf.math.minimum(n_matched * 3, self.n_default_boxes - n_matched)
         else:
             top_k = self.n_default_boxes - n_matched # Equivalent to not doing OHEM
@@ -183,7 +210,7 @@ class AbstractSSD(object):
             (image_loss, k) = args
             return tf.math.reduce_sum(image_loss[:k], axis=-1)
         mined_neg_loss = tf.map_fn(top_k_loss, (neg_class_loss, top_k), fn_output_signature=tf.float32)
-        class_loss_by_image = pos_class_loss + beta*mined_neg_loss
+        class_loss_by_image = pos_class_loss + self.neg_loss_weight*mined_neg_loss
         
         ####### Localization Loss #######
         pred_boxes = prediction_dict["bbox"]

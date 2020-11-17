@@ -1,4 +1,7 @@
+# 3rd Party
 import tensorflow as tf
+# Python STL
+import glob
 
 def serialize_ssd_example(image_arr, cls_targets, cls_weights, reg_targets, reg_weights, matched):
     feature = {
@@ -17,6 +20,14 @@ def deserialize_ssd_example(example):
     keys = ["image", "cls_targets", "cls_weights", "reg_targets", "reg_weights", "matched"]
     example = {k:tf.io.parse_tensor(example[k], out_type=tf.float32) for k in keys}
     return example
+
+def ssd_tfrecords_dataset(records_dir, deterministic=True, num_parallel_calls=8):
+    record_paths = glob.glob(os.path.join(records_dir, "*.tfrecord"))
+    dataset = tf.data.TFRecordDataset(record_paths, num_parallel_reads=num_parallel_calls)
+    dataset = dataset.map(deserialize_ssd_example,
+                         deterministic=deterministic,
+                         num_parallel_calls=num_parallel_calls)
+    return dataset
 
 ################ Private ##################
 
