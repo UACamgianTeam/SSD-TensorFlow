@@ -2,6 +2,7 @@
 import tensorflow as tf
 # Python STL
 import glob
+import os
 
 def serialize_ssd_example(image_arr, cls_targets, cls_weights, reg_targets, reg_weights, matched):
     feature = {

@@ -1,5 +1,6 @@
 # 3rd Party
 import tensorflow as tf
+import numpy as np
 # Python STL
 import glob
 import os
@@ -11,6 +12,7 @@ from itertools import product
 import time
 # Local
 from ssd.train import *
+from ssd.data  import *
 from ssd import SSD512_VGG16
 from common.eval import coco_eval
 
@@ -36,10 +38,12 @@ def model_train(model,
     
     checkpoint       = tf.train.Checkpoint(**vars_dict)
     checkpoints_root = model_dir/"checkpoints"
+    bestpoints_root  = model_dir/"bestpoints"
     logdir           = model_dir/"tb"
     os.makedirs(checkpoints_root, exist_ok=True)
     os.makedirs(logdir, exist_ok=True)
-    manager          = tf.train.CheckpointManager(checkpoint, directory=checkpoints_root,max_to_keep=patience + 1)
+    manager          = tf.train.CheckpointManager(checkpoint, directory=checkpoints_root, max_to_keep=patience + 1)
+    best_manager     = tf.train.CheckpointManager(checkpoint, directory=bestpoints_root,  max_to_keep=1)
 
     epoch_index    = vars_dict["epoch_index"]
     optimizer      = vars_dict["optimizer"]
@@ -47,13 +51,13 @@ def model_train(model,
     best_conf_loss = vars_dict["best_valid_conf_loss"]
     waited         = vars_dict["waited"]
 
-    writer = tf.summary.create_file_writer(logdir)
+    writer = tf.summary.create_file_writer(str(logdir))
 
     log_freq  = 100 // batch_size
     shuffle_buffer_size = 1000
     for _ in range(max_epochs):
         epoch_index.assign_add(1)
-        dataset = ssd_tfrecords(train_records_dir)
+        dataset = ssd_tfrecords_dataset(train_records_dir)
         dataset = dataset.shuffle(seed=epoch_index, buffer_size=shuffle_buffer_size)
         dataset = dataset.batch(batch_size)
 
@@ -62,6 +66,7 @@ def model_train(model,
                                   batch_index=vars_dict["batch_index"],
                                   log_freq=log_freq,
                                 writer=writer)
+        print("Completed an epoch")
 
         
         # Validation
@@ -85,7 +90,7 @@ def model_train(model,
 
         manager.save(checkpoint_number=epoch_index)
         if waited >= patience: break
-    return vars_dict
+    return (manager, best_manager)
 
 
 def main():
@@ -97,17 +102,18 @@ def main():
     data_root = Path("./dota_sports_data")
 
     dataset_dirs = [Path(p) for p in glob.glob( f"{data_root}/records*") ]
-    weight_sets = [(1,1), (2,1), (3,1), (4,1), (5,1)]
+    weight_sets = [(1,1), (2,1), (3,1)]
     ohem_sets = [True, False]
     nms_redund_thresholds = [.15, .25, .35, .45, .55, .65]
 
     model_index = 1
     for [dataset_dir, (conf_weight, loc_weight), ohem] in product(dataset_dirs, weight_sets, ohem_sets):
+        print(f"dataset_dir={dataset_dir}, conf_weight={conf_weight}, loc_weight={loc_weight}, ohem={ohem}")
         with open(dataset_dir/"meta.json", "r") as r:
             dataset_meta = json.load(r)
 
         train_records_dir  = dataset_dir/"train"
-        valid_records_dir  = dataset_dir/"valididation"
+        valid_records_dir  = dataset_dir/"validation"
         model_dir          = models_root / f"{model_index}"
         os.makedirs(model_dir, exist_ok=True)
 
@@ -122,10 +128,9 @@ def main():
         model.loc_weight  = loc_weight
         model.ohem        = ohem
 
-#        vars_dict              = model_train(model, train_records_dir, valid_records_dir, model_dir=model_dir)
-#        best_model_index       = int(vars_dict["best_model_index"].numpy())
-#        checkpoint = tf.train.Checkpoint( model_dir / "checkpoints" / f"ckpt-{best_model_index}" )
-
+        (manager, best_manager) = model_train(model, train_records_dir, valid_records_dir, model_dir=model_dir)
+        checkpoint              = best_manager.checkpoint
+        checkpoint.restore(best_manager.latest_checkpoint)
 
         ############### EVALUATION ###################
         out_meta = dict()
@@ -135,8 +140,8 @@ def main():
         for thresh in nms_redund_thresholds:
             model.nms_redund_threshold = thresh
             (metrics_dict, by_class) = coco_eval(model,
-                data_root / 'annotations/train.json',
-                data_root / 'train/images/',
+                data_root / 'annotations/validation.json',
+                data_root / 'validation/images/',
                 min_coverage=min_coverage,
                 desired_categories=desired_categories,
                 win_set=win_set
@@ -147,11 +152,9 @@ def main():
                     "score_threshold"      : model.min_score_threshold,
                     "metrics"              : metrics_dict
             })
-            break
         with open( model_dir / "results.json", "w") as w:
             w.write(json.dumps(out_meta, indent=2) + "\n")
         model_index += 1
-        break
 
 if __name__ == "__main__":
     with tf.device("/device:GPU:2"):

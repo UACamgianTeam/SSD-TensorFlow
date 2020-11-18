@@ -39,6 +39,7 @@ class AbstractSSD(object):
     def __init__(self,
             nonbackground_classes : int,
             loc_weight : float = 1.,
+            conf_weight : float = 1.,
             nms_redund_threshold : float = 0.2,
             min_score_threshold : float  = 0.01,
             top_k_per_class : int = 100,
@@ -53,6 +54,7 @@ class AbstractSSD(object):
         self._ohem = ohem
         self._neg_loss_weight = neg_loss_weight
         self._loc_weight = loc_weight
+        self._conf_weight = conf_weight
         self._nms_redund_threshold = nms_redund_threshold
         self._min_score_threshold = min_score_threshold
         self._top_k_per_class = top_k_per_class
@@ -86,12 +88,21 @@ class AbstractSSD(object):
     @top_k_per_class.setter
     def top_k_per_class(self, v):
         self._top_k_per_class = v
+
     @property
     def loc_weight(self) -> float:
         return self._loc_weight
     @loc_weight.setter
     def loc_weight(self, v: float):
         self._loc_weight = v
+
+    @property
+    def conf_weight(self) -> float:
+        return self._conf_weight
+    @conf_weight.setter
+    def conf_weight(self, v: float):
+        self._conf_weight = v
+
     @property
     def ohem(self) -> float:
         return self._ohem
@@ -128,7 +139,7 @@ class AbstractSSD(object):
             (best_inds, best_scores) = tf.image.non_max_suppression_with_scores(boxes,scores,
                                                                                 max_output_size=self.top_k_per_class,
                                                                                 iou_threshold=self.nms_redund_threshold,
-                                                                                score_threshold=0.01)
+                                                                                score_threshold=self.min_score_threshold)
             best_boxes = tf.gather(boxes, best_inds, axis=0)
             best_labels = tf.fill( tf.shape(best_boxes)[:-1], class_index)
             return [best_boxes, best_scores, best_labels]
@@ -226,7 +237,7 @@ class AbstractSSD(object):
         losses_dict = {
             "Localization": total_loc_loss,
             "Confidence": total_class_loss,
-            "WeightedTotal": total_class_loss + self.loc_weight*total_loc_loss
+            "WeightedTotal": self.conf_weight*total_class_loss + self.loc_weight*total_loc_loss
         }
         return losses_dict
 
