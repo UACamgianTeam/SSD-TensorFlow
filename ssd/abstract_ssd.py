@@ -6,6 +6,7 @@ import tensorflow as tf
 import numpy as np
 # Python STL
 from typing import Tuple,Dict,List
+import pdb
 # Local
 from .components import horizontal_multibox_layer, class_multibox_layer, smooth_l1
 from .targets import compute_ssd_targets
@@ -118,7 +119,6 @@ class AbstractSSD(object):
     def neg_loss_weight(self, v: float):
         self._neg_loss_weight = v
 
-    @tf.function
     def postprocess(self, prediction_dict, shapes):
         logits = tf.squeeze(prediction_dict["class_predictions_with_background"])
         probs = tf.keras.layers.Softmax()(logits)
@@ -210,7 +210,7 @@ class AbstractSSD(object):
     def loss(self, prediction_dict) -> Dict[str,tf.Tensor]:
         n_matched = tf.math.reduce_sum( tf.where(self._matched >= 0, 1, 0), axis=-1 )
         ####### Confidence/Class Loss #######
-        logits = prediction_dict["logit"]
+        logits = prediction_dict["class_predictions_with_background"]
         class_loss = tf.nn.softmax_cross_entropy_with_logits(self._cls_targets, logits, axis=-1)
 
         # Class loss for all the matched boxes (the easy part)
@@ -234,7 +234,7 @@ class AbstractSSD(object):
         class_loss_by_image = pos_class_loss + self.neg_loss_weight*mined_neg_loss
         
         ####### Localization Loss #######
-        pred_boxes = prediction_dict["bbox"]
+        pred_boxes = prediction_dict["box_encodings"]
         loc_loss = self._reg_targets - pred_boxes
         loc_loss = smooth_l1(loc_loss, alpha=1.)
         loc_loss = tf.math.reduce_sum(loc_loss, axis=-1) # Sum across box coordinates

@@ -30,7 +30,6 @@ def main(out_dir,
         desired_categories = None,
         win_set = None,
         min_coverage=.3,
-        fileprefix = "ssd_examples",
         num_out_files = 30):
     os.makedirs(out_dir,exist_ok=True)
     
@@ -52,7 +51,7 @@ def main(out_dir,
     unmatched_class_target    = SSD_class.get_unmatched_class_target(num_nonbackground_classes)
     box_coder                 = faster_rcnn_box_coder.FasterRcnnBoxCoder()
     
-    filenames = [os.path.join(out_dir, f"{fileprefix}_{i}.tfrecord") for i in range(num_out_files) ]
+    filenames = [os.path.join(out_dir, f"examples_{i}.tfrecord") for i in range(num_out_files) ]
     writers   = [tf.io.TFRecordWriter(f) for f in filenames]
     
     count = 0    
@@ -96,6 +95,8 @@ if __name__ == "__main__":
     parser.add_argument("--sports", action="store_true", help="Limit to four sports categories")
     parser.add_argument("--out-files", type=int, default=30, help="Number of record files to generate")
 
+    parser.add_argument("--model", default="ssd_mobilenet", help='"ssd_mobilnet" or "ssd512_vgg16"')
+
     parser.add_argument("--min-coverage", type=float, default=0.3, help="For annotation to be preserved after windowing, at least this much must be present in the window")
 
     parser.add_argument("--win", type=win_tuple, default=(1024,1024,512,512), help="How to window images: \"height,width,vert_stride,horiz_stride\"")
@@ -106,11 +107,18 @@ if __name__ == "__main__":
         desired_categories = ["tennis-court", "baseball-diamond", "ground-track-field", "soccer-ball-field"]
     else:
         desired_categories = None
+
+    if args.model == "ssd_mobilenet":
+        SSD_class = SSD_Mobilenet
+    elif args.model == "ssd512_vgg16":
+        SSD_class = SSD512_VGG16
+    else:
+        raise Exception
         
     min_coverage = args.min_coverage
     win_set      = args.win
     win_string   = "x".join(map(str,win_set))
-    records_dir  = os.path.join(args.in_dir, f"records_window{win_string}_coverage{min_coverage}")
+    records_dir  = os.path.join(args.in_dir, args.model, f"records_window{win_string}_coverage{min_coverage}")
 
     def write_partition(partition):
         image_dir        = os.path.join(args.in_dir, f"{partition}/images")
@@ -119,11 +127,10 @@ if __name__ == "__main__":
         main(partition_out,
                 image_dir,
                 annotations_path,
-                SSD_Mobilenet,
+                SSD_class,
                 win_set=win_set,
                 min_coverage=min_coverage,
                 desired_categories=desired_categories,
-                fileprefix="ssd_mobilenet_examples",
                 num_out_files=args.out_files
         )
 

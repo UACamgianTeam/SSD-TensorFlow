@@ -4,10 +4,11 @@ from object_detection.utils import config_util
 from object_detection.builders import model_builder
 # Python STL
 import os
+import pdb
 # Local
 from . import AbstractSSD
 
-_pipeline_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssd_mobilenet_pipeline.config")
+_pipeline_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssd_mobilenet_hbb_pipeline.config")
 
 class SSD_Mobilenet(AbstractSSD):
 
@@ -28,7 +29,8 @@ class SSD_Mobilenet(AbstractSSD):
         configs = config_util.get_configs_from_pipeline_file(_pipeline_path)
         orig_model = model_builder.build(configs["model"], is_training=True)
         orig_model(tf.zeros([1,300,300,3])) # Force the anchors to be built
-        return orig_model.anchors
+        anchors = orig_model.anchors
+        return anchors
 
     @staticmethod
     def get_unmatched_class_target(num_classes):
@@ -36,14 +38,15 @@ class SSD_Mobilenet(AbstractSSD):
 
     ################# PUBLIC MEMBERS #########################
 
-    def __init__(self, nonbackground_classes):
+    def __init__(self, nonbackground_classes, obb=False):
 
-        super(SSD_Mobilenet, self).__init__(nonbackground_classes=nonbackground_classes)
+        super(SSD_Mobilenet, self).__init__(nonbackground_classes=nonbackground_classes, obb=obb)
 
         configs = config_util.get_configs_from_pipeline_file(_pipeline_path)
-        configs.ssd["num_classes"] = nonbackground_classes
-
+        configs["model"].ssd.num_classes = nonbackground_classes
         orig_model = model_builder.build(configs["model"], is_training=True)
+        orig_model(tf.zeros([1,300,300,3]))
+        self._anchors    = orig_model.anchors
         self._orig_model = orig_model
 
         self.input_dims = SSD_Mobilenet.get_input_dims()
@@ -64,13 +67,12 @@ class SSD_Mobilenet(AbstractSSD):
 
     # This is redundant now, but we may need more flexibility
     #  later
-    @tf.function
-    def postprocess(self, prediction_dict, shapes):
-        return super().postprocess(prediction_dict, shapes)
+    #def postprocess(self, prediction_dict, shapes):
+    #    return super().postprocess(prediction_dict, shapes)
 
     @property
     def variables(self):
-        raise NotImplementedError
+        return self._orig_model.variables
     @property
     def trainable_variables(self):
         return self._trainable_variables
@@ -85,5 +87,5 @@ class SSD_Mobilenet(AbstractSSD):
         raise NotImplementedError
     @property
     def anchors(self):
-        return self._orig_model.anchors
+        return self._anchors
 

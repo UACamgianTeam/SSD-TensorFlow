@@ -13,7 +13,7 @@ import time
 # Local
 from ssd.train import *
 from ssd.data  import *
-from ssd import SSD512_VGG16
+from ssd import SSD512_VGG16, SSD_Mobilenet
 from common.eval import coco_eval
 
 
@@ -24,7 +24,6 @@ def model_train(model,
                 max_epochs=100,
                 batch_size=4,
                 patience=5):
-
     vars_dict = {
         "waited"               : tf.Variable(0, trainable=False, shape=(), dtype=tf.int64),
         "epoch_index"          : tf.Variable(0, trainable=False, shape=(), dtype=tf.int64),
@@ -32,7 +31,7 @@ def model_train(model,
         "batch_index"          : tf.Variable(0, trainable=False, shape=(), dtype=tf.int64),
         "best_valid_loc_loss"  : tf.Variable(np.inf, trainable=False, shape=(), dtype=tf.float32),
         "best_valid_conf_loss" : tf.Variable(np.inf, trainable=False, shape=(), dtype=tf.float32),
-        "model"                : model.model,
+        "model"                : model.variables,
         "optimizer"            : tf.keras.optimizers.Adam(learning_rate=1e-5)
     }
     
@@ -93,18 +92,20 @@ def model_train(model,
     return (manager, best_manager)
 
 
-def main():
+def main(records_root,
+        model_gen,
+        weight_sets           = [(1,1)],
+        ohem_sets             = [True],
+        nms_redund_thresholds = [.15, .25, .35, .45, .55, .65] ):
+
     timestamp = int(time.time())
     print(f"Storing all results in {timestamp} directory")
     models_root = Path("./experiments_gridsearch") / str(timestamp)
     os.makedirs(models_root, exist_ok=True)
 
     data_root = Path("./dota_sports_data")
-
-    dataset_dirs = [Path(p) for p in glob.glob( f"{data_root}/records*") ]
-    weight_sets = [(1,1), (2,1), (3,1)]
-    ohem_sets = [True, False]
-    nms_redund_thresholds = [.15, .25, .35, .45, .55, .65]
+    dataset_dirs = [Path(p) for p in glob.glob( f"{records_root}/*") ]
+    
 
     model_index = 1
     for [dataset_dir, (conf_weight, loc_weight), ohem] in product(dataset_dirs, weight_sets, ohem_sets):
@@ -122,8 +123,7 @@ def main():
         desired_categories = dataset_meta["classes"]
 
         ############### TRAINING  ##################
-        weights_path      = "/data/pretrained_models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5"
-        model             = SSD512_VGG16.from_scratch(len(desired_categories), weights_path)
+        model             = model_gen()
         model.conf_weight = conf_weight
         model.loc_weight  = loc_weight
         model.ohem        = ohem
@@ -156,6 +156,28 @@ def main():
             w.write(json.dumps(out_meta, indent=2) + "\n")
         model_index += 1
 
+
+def gen_ssd_mobilenet(n_categories):
+    model = SSD_Mobilenet(n_categories)
+    # TODO: Initialize pretrained layers
+    return model
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train multiple models with different hyperparameters")
+
+    parser.add_argument("--records-root", required=True, help="Directory containing directories of TFRecords")
+    parser.add_argument("--model", default="ssd_mobilenet", help='"ssd_mobilenet" or "ssd512_vgg16"')
+
+    args = parser.parse_args()
+
+    n_categories = 4
+
+    if args.model == "ssd_mobilenet":
+        model_gen    = lambda: gen_ssd_mobilenet(n_categories)
+    elif args.model == "ssd512_vgg16":
+        weights_path = "/data/pretrained_models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5"
+        model_gen    = lambda: SSD512_VGG16.from_scratch(n_categories, weights_path)
+
     with tf.device("/device:GPU:2"):
-        main()
+        print(SSD_Mobilenet.get_anchors())
+        main(args.records_root, model_gen)
