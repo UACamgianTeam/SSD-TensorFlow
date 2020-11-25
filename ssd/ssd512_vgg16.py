@@ -16,27 +16,27 @@ class SSD512_VGG16(AbstractSSD):
     @staticmethod
     def from_scratch(nonbackground_classes : int,
                      vgg_weights_path      : str,
-                     quadrangles           : bool  = False,
+                     obb           : bool  = False,
                      loc_weight            : float = 1.,
                      nms_redund_threshold  : float = 0.2,
                      top_k_per_class       : int   = 100,
                      predictor_subset      : List[int] = None):
         return SSD512_VGG16(nonbackground_classes,
                 vgg_weights_path=vgg_weights_path,
-                quadrangles=quadrangles,
+                obb=obb,
                 loc_weight=loc_weight,
                 nms_redund_threshold=nms_redund_threshold)
 
     @staticmethod
     def from_checkpoint(nonbackground_classes : int,
                         checkpoint_path       : str,
-                        quadrangles           : bool  = False,
+                        obb           : bool  = False,
                         loc_weight            : float = 1.,
                         nms_redund_threshold  : float = 0.2,
                         top_k_per_class       : int   = 100):
         model = SSD512_VGG16(nonbackground_classes,
                 vgg_weights_path=None,
-                quadrangles=quadrangles,
+                obb=obb,
                 loc_weight=loc_weight,
                 nms_redund_threshold=nms_redund_threshold)
         model.checkpoint.restore(checkpoint_path)
@@ -83,13 +83,13 @@ class SSD512_VGG16(AbstractSSD):
         return scales
 
     @staticmethod
-    def get_default_boxes():
+    def get_anchors():
         feature_shapes = SSD512_VGG16.get_feature_shapes()
         ratios         = SSD512_VGG16.get_ratios()
         scales         = SSD512_VGG16.get_scales()
-        default_boxes  = multilayer_default_boxes(feature_shapes, ratios, scales)
-        default_boxes  = tf.constant(default_boxes, dtype=tf.float32)
-        return BoxList(default_boxes)
+        anchors  = multilayer_default_boxes(feature_shapes, ratios, scales)
+        anchors  = tf.constant(anchors, dtype=tf.float32)
+        return BoxList(anchors)
 
     @staticmethod
     def get_unmatched_class_target(num_classes):
@@ -98,7 +98,7 @@ class SSD512_VGG16(AbstractSSD):
     def __init__(self,
             nonbackground_classes: int,
             vgg_weights_path = None,
-            quadrangles=False,
+            obb=False,
             loc_weight=1.,
             nms_redund_threshold=0.2,
             top_k_per_class          : int   = 100):
@@ -113,11 +113,10 @@ class SSD512_VGG16(AbstractSSD):
         self._feature_shapes = SSD512_VGG16.get_feature_shapes()
         self._ratios         = SSD512_VGG16.get_ratios()
         self._scales         = SSD512_VGG16.get_scales()
-        self.quadrangles     = quadrangles
 
-        default_boxes = multilayer_default_boxes(self._feature_shapes, self._ratios, self._scales)
-        default_boxes = tf.constant(default_boxes, dtype=tf.float32)
-        self._default_boxes = BoxList(default_boxes)
+        anchors = multilayer_default_boxes(self._feature_shapes, self._ratios, self._scales)
+        anchors = tf.constant(anchors, dtype=tf.float32)
+        self._anchors = BoxList(anchors)
 
         self._load_features(vgg_weights_path = vgg_weights_path)
         assert len(self._feature_shapes) == len(self._feature_maps)
@@ -131,7 +130,7 @@ class SSD512_VGG16(AbstractSSD):
             c = tf.reshape(c, [
                             -1, # Batch dimension,
                             c.shape[1] * c.shape[2] * num_anchors, # Y * X * box_shape
-                            8 if self.quadrangles else 4
+                            12 if self.obb else 4
             ])
             self.coordinates.append(c)
 
@@ -148,8 +147,8 @@ class SSD512_VGG16(AbstractSSD):
         self.model = tf.keras.Model(
             inputs=[self.input],
             outputs={
-                "bbox": self.coordinates,
-                "logit": self.logits
+                "box_encodings"                    : self.coordinates,
+                "class_predictions_with_background": self.logits
             }
         )
 
@@ -166,20 +165,17 @@ class SSD512_VGG16(AbstractSSD):
 
    
 
-    def _load_features(self, vgg_weights_path : str = None, ckpt_path: str = None):
+    def _load_features(self, vgg_weights_path : str = None):
         self.input = tf.keras.Input([*self.input_dims, 3], dtype=tf.uint8)
         vgg_preprocessed = tf.keras.applications.vgg16.preprocess_input(self.input)
         
         ### Load VGG 16 Base Network ###
-        if not ckpt_path:
-            vgg_base = tf.keras.applications.VGG16(
-                include_top = False,       # Don't need the fully-connected layers
-                input_shape = (*self.input_dims,3), 
-                pooling = None,            # SSD does not apply global max pooling on the last VGG layer
-                weights = vgg_weights_path if vgg_weights_path else None # None causes random initilization
-            )
-        else:
-            pass #TODO: Let users use ckpt_path to restore weights from checkpoint
+        vgg_base = tf.keras.applications.VGG16(
+            include_top = False,       # Don't need the fully-connected layers
+            input_shape = (*self.input_dims,3), 
+            pooling = None,            # SSD does not apply global max pooling on the last VGG layer
+            weights = vgg_weights_path if vgg_weights_path else None # None causes random initilization
+        )
 
 
 
@@ -255,8 +251,8 @@ class SSD512_VGG16(AbstractSSD):
     def feature_shapes(self):
         return self._feature_shapes
     @property
-    def default_boxes(self):
-        return self._default_boxes
+    def anchors(self):
+        return self._anchors
     @property
     def checkpoint(self) -> tf.train.Checkpoint:
         return self._checkpoint

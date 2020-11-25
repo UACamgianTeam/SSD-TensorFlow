@@ -1,13 +1,13 @@
 # 3rd Party
 from object_detection.core.box_list import BoxList
 from object_detection.box_coders import faster_rcnn_box_coder
+from object_detection.box_coders import oriented_box_coder      # From our fork of TFObj
 import tensorflow as tf
 import numpy as np
 # Python STL
 from typing import Tuple,Dict,List
 # Local
 from .components import horizontal_multibox_layer, class_multibox_layer, smooth_l1
-from .boxes import multilayer_default_boxes
 from .targets import compute_ssd_targets
 
 class AbstractSSD(object):
@@ -29,7 +29,7 @@ class AbstractSSD(object):
     def predict(self, image, shapes):
         raise NotImplementedError
     @property
-    def default_boxes(self) -> BoxList:
+    def anchors(self) -> BoxList:
         raise NotImplementedError
 
 
@@ -45,11 +45,13 @@ class AbstractSSD(object):
             top_k_per_class : int = 100,
             ohem : bool = False,
             neg_loss_weight : float = 1.,
-            box_coder = faster_rcnn_box_coder.FasterRcnnBoxCoder()):
+            obb             : bool  = False):
 
         self.num_nonbackground_classes = nonbackground_classes
         self.num_classes = nonbackground_classes + 1
-        self.box_coder = box_coder
+
+        self.obb         = obb
+        self.box_coder   = oriented_box_coder.OrientedBoxCoder() if obb else faster_rcnn_box_coder.FasterRcnnBoxCoder()
 
         self._ohem = ohem
         self._neg_loss_weight = neg_loss_weight
@@ -65,8 +67,8 @@ class AbstractSSD(object):
         return tf.constant([1] + [0]*num_classes, dtype=tf.float32)
 
     @property
-    def n_default_boxes(self):
-        return self.default_boxes.get().shape[0]
+    def n_anchors(self):
+        return self.anchors.get().shape[0]
 
     @property
     def nms_redund_threshold(self):
@@ -116,15 +118,22 @@ class AbstractSSD(object):
     def neg_loss_weight(self, v: float):
         self._neg_loss_weight = v
 
-
     @tf.function
     def postprocess(self, prediction_dict, shapes):
-        logits = tf.squeeze(prediction_dict["logit"])
+        logits = tf.squeeze(prediction_dict["class_predictions_with_background"])
         probs = tf.keras.layers.Softmax()(logits)
     
-        boxes = tf.squeeze(prediction_dict["bbox"])
-        boxes = self.box_coder.decode(boxes, self.default_boxes)
-        boxes = boxes.get() # The actual array of boxes
+        encodings = tf.squeeze(prediction_dict["box_encodings"])
+
+        hbb_boxes = self.box_coder.decode(encodings, self.anchors)
+        hbb_boxes = hbb_boxes.get() # The actual array of boxes
+
+        # We use the HBBs for non-max suppression, but we gather our results from either the HBBs
+        # or the OBBs
+        if self.obb:
+            gather_boxes = self.box_coder.batch_obb_decode(encodings, self.anchors)
+        else:
+            gather_boxes = hbb_boxes
     
     
         probs_rank = tf.rank(probs)
@@ -136,11 +145,12 @@ class AbstractSSD(object):
         class_indices = tf.range(0, self.num_nonbackground_classes, dtype=tf.int32)
     
         def nms_class(scores, class_index):
-            (best_inds, best_scores) = tf.image.non_max_suppression_with_scores(boxes,scores,
+            (best_inds, best_scores) = tf.image.non_max_suppression_with_scores(hbb_boxes,
+                                                                                scores,
                                                                                 max_output_size=self.top_k_per_class,
                                                                                 iou_threshold=self.nms_redund_threshold,
                                                                                 score_threshold=self.min_score_threshold)
-            best_boxes = tf.gather(boxes, best_inds, axis=0)
+            best_boxes = tf.gather(gather_boxes, best_inds, axis=0)
             best_labels = tf.fill( tf.shape(best_boxes)[:-1], class_index)
             return [best_boxes, best_scores, best_labels]
     
@@ -180,7 +190,7 @@ class AbstractSSD(object):
         unmatched_class_label = tf.constant([1] + [0 for _ in range(self.num_nonbackground_classes)], dtype=tf.float32)
         output = compute_ssd_targets(groundtruth_boxes_list,
                                 groundtruth_labels_list,
-                                self.default_boxes,
+                                self.anchors,
                                 self.box_coder,
                                 AbstractSSD.get_unmatched_class_target())
         self.provide_groundtruth_direct(*output)
@@ -211,9 +221,9 @@ class AbstractSSD(object):
         neg_class_loss = tf.sort( tf.where(self._matched >= 0, 0, class_loss), direction="DESCENDING", axis=-1)
 
         if self.ohem:
-            top_k = tf.math.minimum(n_matched * 3, self.n_default_boxes - n_matched)
+            top_k = tf.math.minimum(n_matched * 3, self.n_anchors - n_matched)
         else:
-            top_k = self.n_default_boxes - n_matched # Equivalent to not doing OHEM
+            top_k = self.n_anchors - n_matched # Equivalent to not doing OHEM
 
         # For a given image, we want the ratio of unmatched to matched default boxes to be at most 3:1 (See page 6 of original SSD paper)
         # Sum the loss of the top-k boxes for each image

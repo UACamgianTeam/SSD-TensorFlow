@@ -14,7 +14,7 @@ from ood.preprocess import *
 from ood.utils import get_annotations, visualize_image_set
 
 # Local
-from ssd import SSD512_VGG16
+from ssd import SSD512_VGG16, SSD_Mobilenet
 from ssd.targets import compute_ssd_targets
 from ssd.data    import *
 
@@ -26,9 +26,11 @@ def win_tuple(arg):
 def main(out_dir,
         image_dir,
         annotations_path,
+        SSD_class,
         desired_categories = None,
         win_set = None,
         min_coverage=.3,
+        fileprefix = "ssd_examples",
         num_out_files = 30):
     os.makedirs(out_dir,exist_ok=True)
     
@@ -45,13 +47,11 @@ def main(out_dir,
     label_id_offsets = calculate_label_id_offsets(category_index)
     
     num_nonbackground_classes = len(desired_categories)
-    input_dims = SSD512_VGG16.get_input_dims()
+    input_dims                = SSD_class.get_input_dims()
+    default_boxes             = SSD_class.get_anchors()
+    unmatched_class_target    = SSD_class.get_unmatched_class_target(num_nonbackground_classes)
+    box_coder                 = faster_rcnn_box_coder.FasterRcnnBoxCoder()
     
-    default_boxes = SSD512_VGG16.get_default_boxes()
-    unmatched_class_target = SSD512_VGG16.get_unmatched_class_target(num_nonbackground_classes)
-    box_coder = faster_rcnn_box_coder.FasterRcnnBoxCoder()
-    
-    fileprefix = "ssd512_examples"
     filenames = [os.path.join(out_dir, f"{fileprefix}_{i}.tfrecord") for i in range(num_out_files) ]
     writers   = [tf.io.TFRecordWriter(f) for f in filenames]
     
@@ -119,9 +119,11 @@ if __name__ == "__main__":
         main(partition_out,
                 image_dir,
                 annotations_path,
+                SSD_Mobilenet,
                 win_set=win_set,
                 min_coverage=min_coverage,
                 desired_categories=desired_categories,
+                fileprefix="ssd_mobilenet_examples",
                 num_out_files=args.out_files
         )
 
