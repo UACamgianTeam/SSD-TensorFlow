@@ -21,9 +21,12 @@ def model_train(model,
                 train_records_dir,
                 valid_records_dir,
                 model_dir,
+                early_stop_by="both",
                 max_epochs=100,
                 batch_size=4,
+                learning_rate=1e-6,
                 patience=10):
+    assert early_stop_by in {"both","loc","conf"}
     vars_dict = {
         "waited"               : tf.Variable(0, trainable=False, shape=(), dtype=tf.int64),
         "epoch_index"          : tf.Variable(0, trainable=False, shape=(), dtype=tf.int64),
@@ -32,7 +35,7 @@ def model_train(model,
         "best_valid_loc_loss"  : tf.Variable(np.inf, trainable=False, shape=(), dtype=tf.float32),
         "best_valid_conf_loss" : tf.Variable(np.inf, trainable=False, shape=(), dtype=tf.float32),
         "model"                : model.variables,
-        "optimizer"            : tf.keras.optimizers.Adam(learning_rate=1e-6)
+        "optimizer"            : tf.keras.optimizers.Adam(learning_rate=learning_rate)
     }
     
     checkpoint       = tf.train.Checkpoint(**vars_dict)
@@ -75,10 +78,24 @@ def model_train(model,
         loss_dict = validation_loss(model, valid_dataset)
         loc_loss = loss_dict["Localization"]
         conf_loss = loss_dict["Confidence"]
-        if (loc_loss < best_loc_loss) and (conf_loss < best_conf_loss):
-            print(f"New best validation_losses: Loc={loc_loss}, Conf={conf_loss}")
+
+        print(f"Validation loss: Conf={conf_loss}, Loc={loc_loss}")
+
+
+        if (early_stop_by == "both") and (loc_loss < best_loc_loss) and (conf_loss < best_conf_loss):
+            print("New best!")
             vars_dict["best_model_index"].assign(epoch_index)
             best_loc_loss.assign(loc_loss)
+            best_conf_loss.assign(conf_loss)
+            waited.assign(0)
+        elif (early_stop_by == "loc") and (loc_loss < best_loc_loss):
+            print("New best!")
+            vars_dict["best_model_index"].assign(epoch_index)
+            best_loc_loss.assign(loc_loss)
+            waited.assign(1)
+        elif (early_stop_by == "conf") and (conf_loss < best_conf_loss):
+            print("New best!")
+            vars_dict["best_model_index"].assign(epoch_index)
             best_conf_loss.assign(conf_loss)
             waited.assign(0)
         else:
@@ -96,7 +113,10 @@ def main(records_root,
         model_gen,
         weight_sets           = [(1,1)],
         ohem_sets             = [True],
-        nms_redund_thresholds = [.15, .25, .35, .45, .55, .65] ):
+        early_stop_by         = "both",
+        nms_redund_thresholds = [.15, .25, .35, .45, .55, .65],
+        learning_rates=[1e-6]):
+    assert early_stop_by in {"both","loc","conf"}
 
     timestamp = int(time.time())
     print(f"Storing all results in {timestamp} directory")
@@ -108,8 +128,8 @@ def main(records_root,
     
 
     model_index = 1
-    for [dataset_dir, (conf_weight, loc_weight), ohem] in product(dataset_dirs, weight_sets, ohem_sets):
-        print(f"dataset_dir={dataset_dir}, conf_weight={conf_weight}, loc_weight={loc_weight}, ohem={ohem}")
+    for [dataset_dir, (conf_weight, loc_weight), ohem, learning_rate] in product(dataset_dirs, weight_sets, ohem_sets, learning_rates):
+        print(f"dataset_dir={dataset_dir}, conf_weight={conf_weight}, loc_weight={loc_weight}, ohem={ohem}, learning_rate={learning_rate}, early_stop_by={early_stop_by}")
         with open(dataset_dir/"meta.json", "r") as r:
             dataset_meta = json.load(r)
 
@@ -128,13 +148,23 @@ def main(records_root,
         model.loc_weight  = loc_weight
         model.ohem        = ohem
 
-        (manager, best_manager) = model_train(model, train_records_dir, valid_records_dir, model_dir=model_dir)
+        (manager, best_manager) = model_train(model,
+                                            train_records_dir,
+                                            valid_records_dir,
+                                            model_dir=model_dir,
+                                            early_stop_by=early_stop_by,
+                                            learning_rate=learning_rate)
         checkpoint              = best_manager.checkpoint
         checkpoint.restore(best_manager.latest_checkpoint)
 
         ############### EVALUATION ###################
         out_meta = dict()
         out_meta["dataset"]     = dataset_meta
+        out_meta["loc_weight"]  = loc_weight
+        out_meta["conf_weight"] = conf_weight
+        out_meta["ohem"]        = ohem
+        out_meta["early_stop_by"] = early_stop_by
+        out_meta["learning_rate"] = learning_rate
         out_meta["dataset_dir"] = str(dataset_dir)
         out_meta["evaluations"] = []
         for thresh in nms_redund_thresholds:
@@ -179,5 +209,11 @@ if __name__ == "__main__":
         model_gen    = lambda: SSD512_VGG16.from_scratch(n_categories, weights_path)
 
     with tf.device("/device:GPU:2"):
-        print(SSD_Mobilenet.get_anchors())
-        main(args.records_root, model_gen)
+        main(args.records_root,
+            model_gen,
+            weight_sets           = [(1,1)],
+            early_stop_by         = "conf",
+            ohem_sets             = [True],
+            nms_redund_thresholds = [.15,.25,.35,.45,.55,.65,.75],
+            learning_rates        = [1e-4]
+        )
