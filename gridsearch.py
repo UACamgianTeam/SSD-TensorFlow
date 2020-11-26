@@ -23,7 +23,7 @@ def model_train(model,
                 model_dir,
                 max_epochs=100,
                 batch_size=4,
-                patience=5):
+                patience=10):
     vars_dict = {
         "waited"               : tf.Variable(0, trainable=False, shape=(), dtype=tf.int64),
         "epoch_index"          : tf.Variable(0, trainable=False, shape=(), dtype=tf.int64),
@@ -32,7 +32,7 @@ def model_train(model,
         "best_valid_loc_loss"  : tf.Variable(np.inf, trainable=False, shape=(), dtype=tf.float32),
         "best_valid_conf_loss" : tf.Variable(np.inf, trainable=False, shape=(), dtype=tf.float32),
         "model"                : model.variables,
-        "optimizer"            : tf.keras.optimizers.Adam(learning_rate=1e-5)
+        "optimizer"            : tf.keras.optimizers.Adam(learning_rate=1e-6)
     }
     
     checkpoint       = tf.train.Checkpoint(**vars_dict)
@@ -157,9 +157,9 @@ def main(records_root,
         model_index += 1
 
 
-def gen_ssd_mobilenet(n_categories):
+def gen_ssd_mobilenet(n_categories, checkpoint_path):
     model = SSD_Mobilenet(n_categories)
-    # TODO: Initialize pretrained layers
+    model.initialize_feature_extractor(checkpoint_path)
     return model
 
 if __name__ == "__main__":
@@ -171,9 +171,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     n_categories = 4
-
     if args.model == "ssd_mobilenet":
-        model_gen    = lambda: gen_ssd_mobilenet(n_categories)
+        checkpoint_path = "/data/pretrained_models/ssd_mobilenet_v2_320x320_coco17_tpu-8/checkpoint/ckpt-0"
+        model_gen       = lambda: gen_ssd_mobilenet(n_categories, checkpoint_path)
     elif args.model == "ssd512_vgg16":
         weights_path = "/data/pretrained_models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5"
         model_gen    = lambda: SSD512_VGG16.from_scratch(n_categories, weights_path)

@@ -54,7 +54,7 @@ class SSD_Mobilenet(AbstractSSD):
 
         
         # Only retraining the predictor heads
-        self._trainable_variables = [v for v in orig_model.trainable_variables if v.name.startswith("ssd_meta_arch/BoxPredictor")]
+        #self._trainable_variables = [v for v in orig_model.trainable_variables if v.name.startswith("ssd_meta_arch/BoxPredictor")]
 
     def initialize_feature_extractor(self, ckpt_path: str):
         fake_model = tf.compat.v2.train.Checkpoint(_feature_extractor=self._orig_model._feature_extractor)
@@ -79,7 +79,7 @@ class SSD_Mobilenet(AbstractSSD):
         return self._orig_model.variables
     @property
     def trainable_variables(self):
-        return self._trainable_variables
+        return self._orig_model.trainable_variables
     @property
     def ratios(self):
         raise NotImplementedError
