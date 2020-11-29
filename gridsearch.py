@@ -104,8 +104,6 @@ def main(records_dir,
     data_root = Path("./dota_sports_data")
     dataset_dir = records_dir
     
-
-
     model_index = 1
 
     hparams = [
@@ -206,10 +204,13 @@ if __name__ == "__main__":
             return model
 
         arg_sets = [
-                {"ohem": True, "loc_weight": 1., "conf_weight": 1., "train_from_scratch": False},
-                #{"ohem": True, "loc_weight": 1., "conf_weight": 5., "train_from_scratch": False},
-                #{"ohem": True, "loc_weight": 1., "conf_weight": 1., "train_from_scratch": True},
-                #{"ohem": True, "loc_weight": 1., "conf_weight": 5., "train_from_scratch": True},
+                #{"ohem": True, "loc_weight": 1., "conf_weight": 1., "train_from_scratch": False},
+                #{"ohem": True, "loc_weight": 5.,  "conf_weight": 1., "train_from_scratch": False},
+                #{"ohem": True, "loc_weight": 1.,  "conf_weight": 5., "train_from_scratch": False},
+                #{"ohem": True, "loc_weight": 10., "conf_weight": 1., "train_from_scratch": False},
+                #{"ohem": True, "loc_weight": 1., "conf_weight": 10., "train_from_scratch": False},
+                {"ohem": True, "loc_weight": 1., "conf_weight": 12.5, "train_from_scratch": False},
+                #{"ohem": True, "loc_weight": 1., "conf_weight": 15., "train_from_scratch": False},
         ]
     elif args.model == "ssd512_vgg16":
         weights_path = "/data/pretrained_models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5"
@@ -220,11 +221,18 @@ if __name__ == "__main__":
 
     with tf.device("/device:GPU:2"):
 
+        with open(records_dir/"meta.json", "r") as r: dataset_meta = json.load(r)
+        min_coverage       = dataset_meta["min_coverage"]
+        win_set            = dataset_meta["win_set"]
+        desired_categories = dataset_meta["classes"]
+
+
         valid_records_dir = records_dir / "validation"
         improv_funcs = {
             #"loc_and_conf": make_valid_loss_improv_func(valid_records_dir, by="both", batch_size=4, shuffle_buffer_size=1000)
             #"loc_or_conf": make_valid_loss_improv_func(valid_records_dir, by="either", batch_size=4, shuffle_buffer_size=1000)
-            "conf": make_valid_loss_improv_func(valid_records_dir, by="conf", batch_size=4, shuffle_buffer_size=1000)
+            #"conf": make_valid_loss_improv_func(valid_records_dir, by="conf", batch_size=4, shuffle_buffer_size=1000)
+            "Precision/mAP@.50IOU": make_map_improv_func(Path("./dota_sports_data"),desired_categories, min_coverage, win_set, metric_key="Precision/mAP@.50IOU")
         }
 
         main(records_dir,

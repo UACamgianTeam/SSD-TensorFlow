@@ -3,7 +3,9 @@ import tensorflow as tf
 import numpy as np
 # Python STL
 import datetime
+from pathlib import Path
 # Local
+from common.eval import coco_eval
 from .metrics import *
 from .data    import *
 
@@ -109,6 +111,38 @@ def make_valid_loss_improv_func(valid_records_dir, by="both", shuffle_buffer_siz
     return f
 
 
+def make_map_improv_func(data_root, desired_categories, min_coverage, win_set,
+        nms_redund_threshold=0.75,
+        partition="validation",
+        metric_key="Precision/mAP@.50IOU"):
+
+    data_root = Path(data_root)
+    best_map  = tf.Variable(-1, shape=(), trainable=False, dtype=tf.float32)
+
+    def f(model, writer=None, step=0):
+        old_thresh = model.nms_redund_threshold
+        model.nms_redund_threshold = nms_redund_threshold
+        (metrics_dict, by_class_dict) = coco_eval(model,
+            data_root / f'annotations/{partition}.json',
+            data_root / f'{partition}/images/',
+            min_coverage=min_coverage,
+            desired_categories=desired_categories,
+            win_set=win_set
+        )
+        model.nms_redund_threshold = old_thresh
+
+        map_val = metrics_dict[metric_key]
+        map_improved = map_val > best_map
+        if map_improved: best_map.assign(map_val)
+    
+        if writer:
+            metrics_dict  = prepend_namespace(metrics_dict, partition.capitalize())
+            write_scalars(writer, metrics_dict, step=step)
+            by_class_dict = prepend_namespace(metrics_dict, partition.capitalize())
+            write_scalars(writer, by_class_dict, step=step)
+        return (map_improved, map_val)
+
+    return f
 
 ################## Private ####################
 def _log(msg):
