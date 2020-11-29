@@ -75,44 +75,37 @@ def validation_loss(model, dataset) -> ScalarDict:
 
 
 def make_valid_loss_improv_func(valid_records_dir, by="both", shuffle_buffer_size=1000, batch_size=4):
-    assert by in {"both","conf","loc"}
+    assert by in {"both","conf","loc", "either"}
 
-    if by in {"both", "conf"}:
-        best_conf_loss = tf.Variable(np.inf, shape=(), trainable=False, dtype=tf.float32)
-    if by in {"both", "loc"}:
-        best_loc_loss  = tf.Variable(np.inf, shape=(), trainable=False, dtype=tf.float32)
+    best_conf_loss = tf.Variable(np.inf, shape=(), trainable=False, dtype=tf.float32)
+    best_loc_loss  = tf.Variable(np.inf, shape=(), trainable=False, dtype=tf.float32)
 
     def f(model, writer=None, step=0):
-        epoch_index = step
+        epoch_index   = step
         early_stop_by = by
         valid_dataset = ssd_tfrecords_dataset(valid_records_dir)
         valid_dataset = valid_dataset.shuffle(seed=epoch_index, buffer_size=shuffle_buffer_size)
         valid_dataset = valid_dataset.batch(batch_size)
-        loss_dict = validation_loss(model, valid_dataset)
-        loc_loss = loss_dict["Localization"]
-        conf_loss = loss_dict["Confidence"]
+        loss_dict     = validation_loss(model, valid_dataset)
+        loc_loss      = loss_dict["Localization"]
+        conf_loss     = loss_dict["Confidence"]
 
-        if by == "both":
-            improved = (loc_loss < best_loc_loss) and (conf_loss < best_conf_loss)
-            if improved:
-                best_loc_loss.assign(loc_loss)
-                best_conf_loss.assign(conf_loss)
-            rval = (improved, (conf_loss.numpy(),loc_loss.numpy()))
-        elif by == "loc":
-            improved = (loc_loss < best_loc_loss)
-            if improved: best_loc_loss.assign(loc_loss)
-            rval = (improved, loc_loss.numpy())
-        elif by == "conf":
-            improved = (conf_loss < best_conf_loss)
-            if improved: best_conf_loss.assign(conf_loss)
-            rval = (improved, conf_loss.numpy())
-        else:
-            raise Exception
 
         if writer:
             loss_dict = prepend_namespace(loss_dict, "Loss/Validation")
             write_scalars(writer, loss_dict, step=epoch_index)
-        return rval
+
+        loc_improved  = (loc_loss < best_loc_loss)
+        conf_improved = (conf_loss < best_conf_loss)
+
+        if loc_improved : best_loc_loss.assign(loc_loss)
+        if conf_improved: best_conf_loss.assign(conf_loss)
+
+        if by == "both"  : return (loc_improved and conf_improved, (conf_loss.numpy(),loc_loss.numpy()))
+        if by == "either": return (loc_improved or  conf_improved, (conf_loss.numpy(),loc_loss.numpy()))
+        if by == "conf"  : return (                 conf_improved,  conf_loss.numpy()                  )
+        if by == "loc"   : return (loc_improved                  ,                    loc_loss.numpy() )
+
     return f
 
 

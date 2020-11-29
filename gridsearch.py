@@ -80,7 +80,6 @@ def model_train(model,
                 waited.assign_add(1)
 
         manager.save(checkpoint_number=epoch_index)
-        break
         if waited >= patience: break
 
     if improv_func:
@@ -223,7 +222,9 @@ if __name__ == "__main__":
 
         valid_records_dir = records_dir / "validation"
         improv_funcs = {
-            "loc_and_conf": make_valid_loss_improv_func(valid_records_dir, by="both", batch_size=4, shuffle_buffer_size=1000)
+            #"loc_and_conf": make_valid_loss_improv_func(valid_records_dir, by="both", batch_size=4, shuffle_buffer_size=1000)
+            #"loc_or_conf": make_valid_loss_improv_func(valid_records_dir, by="either", batch_size=4, shuffle_buffer_size=1000)
+            "conf": make_valid_loss_improv_func(valid_records_dir, by="conf", batch_size=4, shuffle_buffer_size=1000)
         }
 
         main(records_dir,
