@@ -1,9 +1,11 @@
 # 3rd Party
 import tensorflow as tf
+import numpy as np
 # Python STL
 import datetime
 # Local
 from .metrics import *
+from .data    import *
 
 ################## Public #####################
 def train_epoch(model, optimizer, dataset,
@@ -70,6 +72,49 @@ def validation_loss(model, dataset) -> ScalarDict:
         n_samples += len(batch["image"])
     scalars = metric2scalar_dict(metrics, v_func = lambda v: v / n_samples, reset_states=True)
     return scalars
+
+
+def make_valid_loss_improv_func(valid_records_dir, by="both", shuffle_buffer_size=1000, batch_size=4):
+    assert by in {"both","conf","loc"}
+
+    if by in {"both", "conf"}:
+        best_conf_loss = tf.Variable(np.inf, shape=(), trainable=False, dtype=tf.float32)
+    if by in {"both", "loc"}:
+        best_loc_loss  = tf.Variable(np.inf, shape=(), trainable=False, dtype=tf.float32)
+
+    def f(model, writer=None, step=0):
+        epoch_index = step
+        early_stop_by = by
+        valid_dataset = ssd_tfrecords_dataset(valid_records_dir)
+        valid_dataset = valid_dataset.shuffle(seed=epoch_index, buffer_size=shuffle_buffer_size)
+        valid_dataset = valid_dataset.batch(batch_size)
+        loss_dict = validation_loss(model, valid_dataset)
+        loc_loss = loss_dict["Localization"]
+        conf_loss = loss_dict["Confidence"]
+
+        if by == "both":
+            improved = (loc_loss < best_loc_loss) and (conf_loss < best_conf_loss)
+            if improved:
+                best_loc_loss.assign(loc_loss)
+                best_conf_loss.assign(conf_loss)
+            rval = (improved, (conf_loss.numpy(),loc_loss.numpy()))
+        elif by == "loc":
+            improved = (loc_loss < best_loc_loss)
+            if improved: best_loc_loss.assign(loc_loss)
+            rval = (improved, loc_loss.numpy())
+        elif by == "conf":
+            improved = (conf_loss < best_conf_loss)
+            if improved: best_conf_loss.assign(conf_loss)
+            rval = (improved, conf_loss.numpy())
+        else:
+            raise Exception
+
+        if writer:
+            loss_dict = prepend_namespace(loss_dict, "Loss/Validation")
+            write_scalars(writer, loss_dict, step=epoch_index)
+        return rval
+    return f
+
 
 
 ################## Private ####################

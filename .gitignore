@@ -8,3 +8,10 @@ tb*
 checkpoints*
 
 archive/
+experiments*
+
+# Common names/prefixes I use for scripts
+run
+script
+test*
+gen*
