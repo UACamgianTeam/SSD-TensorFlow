@@ -5,7 +5,7 @@ from ssd import SSD_Mobilenet
 from common.eval import coco_eval, coco_by_category
 
 data_root = Path("./dota_sports_data")
-results_root = Path("./experiments_gridsearch/1606684100/4")
+results_root = Path("./best_model")
 
 with open(results_root / "results.json", "r") as r: records_dir  = Path( json.load(r)["dataset_dir"] )
 with open(records_dir / "meta.json") as r:         dataset_meta = json.load(r)

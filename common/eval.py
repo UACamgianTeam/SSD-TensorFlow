@@ -82,13 +82,16 @@ def coco_by_category(model, annotations_path, image_dir, desired_categories,
     write_window_results(results_path, test_images_dict, min_threshold=.01)
     write_window_validation_file(labels_path, annotations, test_images_dict)
 
+    id_to_category = construct_id_mapping(desired_categories, annotations["categories"])
+
     #with open(labels_path, "r") as r: cocoGt = COCO(json.load(r))
     cocoGt = COCO(labels_path)
     cocoDt = cocoGt.loadRes(results_path)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType="bbox")
     cocoEval.params.catIds = list(desired_ids) # set category ids we want to evaluate on
+    cocoEval.evaluate()
     cocoEval.accumulate()
-    metrics = cocoEval.summarize(id_to_category=label_id_offsets["map_to_category"])
+    metrics = cocoEval.summarize(id_to_category)
 
     shutil.rmtree(results_dir)
     return metrics

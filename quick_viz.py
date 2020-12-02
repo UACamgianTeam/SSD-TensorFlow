@@ -10,7 +10,7 @@ from ood.preprocess import *
 from ood.utils import *
 
 data_root = Path("./dota_sports_data")
-results_root = Path("./experiments_gridsearch/1606684100/4")
+results_root = Path("./best_model")
 
 with open(results_root / "results.json", "r") as r:
     results_meta = json.load(r)
@@ -33,6 +33,9 @@ desired_ids = construct_desired_ids(desired_categories, annotations['categories'
 category_index = construct_category_index(annotations, desired_categories)
 label_id_offsets = calculate_label_id_offsets(category_index)
 
+better_category_index = {k:category_index[v] for (k,v) in label_id_offsets["map_to_category"].items()}
+for k in better_category_index:
+    better_category_index[k]["id"] = k
 
 #import matplotlib
 #matplotlib.use("TkAgg")
@@ -55,6 +58,5 @@ with tf.device("/device:GPU:2"):
         pred_boxes = tf.squeeze(pred_dict["detection_boxes"]).numpy()
         pred_classes = tf.squeeze(pred_dict["detection_classes"]).numpy()
         pred_scores = tf.squeeze(pred_dict["detection_scores"]).numpy()
-    
-        plot_detections(window_np, pred_boxes, pred_classes, pred_scores, category_index)
+        plot_detections(window_np, pred_boxes, pred_classes, pred_scores, better_category_index, min_threshold=0.1)
         plt.show()
